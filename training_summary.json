@@ -1,0 +1,41 @@
+{
+  "timestamp": "2025-10-14T12:53:18.681241Z",
+  "dataset": "/Users/appdev/Downloads/Waste_Reduction/labeled_waste_dataset.csv",
+  "random_seed": 42,
+  "n_features": 138,
+  "feature_sample": [
+    "cycle_id",
+    "ff_Q_VFD1_Temperature_mean",
+    "ff_Q_VFD1_Temperature_std",
+    "ff_Q_VFD1_Temperature_max",
+    "ff_Q_VFD2_Temperature_mean",
+    "ff_Q_VFD2_Temperature_std",
+    "ff_Q_VFD2_Temperature_max",
+    "ff_Q_VFD3_Temperature_mean",
+    "ff_Q_VFD3_Temperature_std",
+    "ff_Q_VFD3_Temperature_max",
+    "ff_Q_VFD4_Temperature_mean",
+    "ff_Q_VFD4_Temperature_std",
+    "ff_Q_VFD4_Temperature_max",
+    "ff_M_Conv1_Speed_mmps_mean",
+    "ff_M_Conv1_Speed_mmps_std",
+    "ff_M_Conv1_Speed_mmps_max",
+    "ff_M_Conv2_Speed_mmps_mean",
+    "ff_M_Conv2_Speed_mmps_std",
+    "ff_M_Conv2_Speed_mmps_max",
+    "ff_M_Conv3_Speed_mmps_mean"
+  ],
+  "best_threshold": 0.105,
+  "test_support": 9,
+  "test_positive_support": 1,
+  "final_confusion_matrix": [
+    [
+      8,
+      0
+    ],
+    [
+      0,
+      1
+    ]
+  ]
+}
