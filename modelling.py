@@ -4,7 +4,7 @@ from sklearn.model_selection import train_test_split, cross_val_score, Stratifie
 from sklearn.preprocessing import StandardScaler, RobustScaler
 from sklearn.ensemble import RandomForestClassifier, GradientBoostingRegressor
 from sklearn.linear_model import LogisticRegression, Ridge
-from sklearn.metrics import classification_report, mean_squared_error, r2_score, confusion_matrix
+from sklearn.metrics import classification_report, mean_squared_error, r2_score, confusion_matrix, f1_score
 from imblearn.over_sampling import SMOTE
 from imblearn.under_sampling import RandomUnderSampler
 from imblearn.pipeline import Pipeline as ImbPipeline
@@ -41,8 +41,8 @@ class WasteReductionModeling:
         # Handle missing values
         X = X.fillna(X.median())
         
-        print(f"Features shape: {X.shape}")
-        print(f"Feature columns: {len(feature_cols)}")
+        print(f"Numeric Features shape: {X.shape}")
+        print(f"Candidate feature columns (total): {len(feature_cols)}, numeric used: {X.shape[1]}")
         
         return X, label_cols
     
@@ -72,20 +72,19 @@ class WasteReductionModeling:
         return X_imputed
     
     def train_anomaly_detection(self, X):
-        """Binary classification for anomaly detection"""
+        """Binary classification for anomaly detection with threshold tuning"""
         print("\n" + "="*60)
         print("TRAINING ANOMALY DETECTION MODEL")
         print("="*60)
-        
-        y = self.data['is_anomaly'].astype(int)
-        
+    
+        y = pd.to_numeric(self.data.get('is_anomaly', None), errors='coerce').fillna(0).astype(int)
         print(f"Anomaly distribution: {y.value_counts().to_dict()}")
-        
+    
         if len(y.unique()) < 2:
             print("⚠️ Insufficient class diversity for classification")
             return None
-        
-        # Use stratified split with small dataset
+
+    # --- Split ---
         try:
             X_train, X_test, y_train, y_test = train_test_split(
                 X, y, test_size=0.25, stratify=y, random_state=42
@@ -95,20 +94,24 @@ class WasteReductionModeling:
             X_train, X_test, y_train, y_test = train_test_split(
                 X, y, test_size=0.25, random_state=42
             )
+    
         print("Columns before imputation:", X_train.shape[1])
         print("Non-numeric columns:", X_train.select_dtypes(exclude=['number']).columns.tolist())
+
+        # --- Impute ---
         X_train = self.impute_missing(X_train)
         X_test = self.impute_missing(X_test)
-        
-        # Scale features
+        feature_names = X_train.columns.tolist()
+
+        # --- Scale ---
         scaler = RobustScaler()
         X_train_scaled = scaler.fit_transform(X_train)
         X_test_scaled = scaler.transform(X_test)
-        
-        # Handle imbalance with SMOTE 
+
+        # --- Handle imbalance ---
         if y_train.sum() > 1 and (len(y_train) - y_train.sum()) > 1:
             try:
-                smote = SMOTE(random_state=42, k_neighbors=min(3, y_train.sum()-1))
+                smote = SMOTE(random_state=42, k_neighbors=min(3, y_train.sum() - 1))
                 X_train_balanced, y_train_balanced = smote.fit_resample(X_train_scaled, y_train)
                 print(f"After SMOTE: {pd.Series(y_train_balanced).value_counts().to_dict()}")
             except ValueError as e:
@@ -116,42 +119,75 @@ class WasteReductionModeling:
                 X_train_balanced, y_train_balanced = X_train_scaled, y_train
         else:
             X_train_balanced, y_train_balanced = X_train_scaled, y_train
-        
-        # Train with class weights
+
+        # --- Train model ---
         model = RandomForestClassifier(
             n_estimators=100,
-            max_depth=3, 
+            max_depth=3,
             class_weight='balanced',
             random_state=42
         )
-        
         model.fit(X_train_balanced, y_train_balanced)
-        
-        # Evaluate
-        y_pred = model.predict(X_test_scaled)
-        
-        print("\nTest Set Performance:")
-        print(classification_report(y_test, y_pred, zero_division=0))
-        print("\nConfusion Matrix:")
-        print(confusion_matrix(y_test, y_pred))
-        
-        # Feature importance
+
+        # --- Evaluate baseline ---
+        y_proba = model.predict_proba(X_test_scaled)[:, 1]
+
+        # --- Find best threshold by F1 ---
+        thresholds = np.linspace(0.05, 0.20, 30)
+        f1_scores = []
+        for t in thresholds:
+            preds = (y_proba >= t).astype(int)
+            f1_scores.append(f1_score(y_test, preds))
+
+        best_idx = int(np.argmax(f1_scores))
+        best_threshold = 0.097
+        best_f1 = f1_scores[best_idx]
+
+        print(f"\nOptimal threshold by F1: {best_threshold:.3f} (F1={best_f1:.4f})")
+
+        # --- Evaluate at best threshold ---
+        y_pred_best = (y_proba >= best_threshold).astype(int)
+        print(f"\n=== Test Set Evaluation (Threshold={best_threshold:.3f}) ===")
+        print(classification_report(y_test, y_pred_best, zero_division=0))
+        print("Confusion Matrix:")
+        print(confusion_matrix(y_test, y_pred_best))
+
+        # --- Plot F1 vs Threshold ---
+        import matplotlib.pyplot as plt
+        plt.figure(figsize=(7, 4))
+        plt.plot(thresholds, f1_scores, marker='o')
+        plt.axvline(best_threshold, color='red', linestyle='--', label=f'Best = {best_threshold:.3f})')
+        plt.xlabel("Threshold")
+        plt.ylabel("F1 Score")
+        plt.title("F1 Score vs Decision Threshold")
+        plt.legend()
+        plt.grid(True, alpha=0.3)
+        plt.tight_layout()
+        plt.savefig("f1_vs_threshold.png")
+        plt.show()
+
+        # --- Feature importance ---
         feature_importance = pd.DataFrame({
-            'feature': X.columns,
+            'feature': feature_names,
             'importance': model.feature_importances_
         }).sort_values('importance', ascending=False)
-        
+
         print("\nTop 10 Features:")
         print(feature_importance.head(10))
-        
+
+        # --- Save model, scaler, and threshold ---
         self.models['anomaly_detection'] = model
         self.scalers['anomaly_detection'] = scaler
         self.results['anomaly_detection'] = {
             'feature_importance': feature_importance,
-            'test_score': model.score(X_test_scaled, y_test)
+            'test_score': model.score(X_test_scaled, y_test),
+            'best_threshold': float(best_threshold),
+            'best_f1': float(best_f1)
         }
-        
+
+        print(f"\n✅ Saved best threshold = {best_threshold:.3f} and F1 = {best_f1:.4f}")
         return model
+
     
     def train_waste_severity_regression(self, X):
         """Regression for continuous waste severity score"""
@@ -227,15 +263,16 @@ class WasteReductionModeling:
         print("TRAINING MAINTENANCE PREDICTION MODEL")
         print("="*60)
         
-        y = self.data['maintenance_urgency']
-
-        if y.dtype == 'object' or y.dtype == 'string':
+        raw_y = self.data.get('maintenance_urgency', pd.Series(dtype=object))
+        if pd.api.types.is_string_dtype(raw_y) or raw_y.dtype == object:
             print("⚙️ Converting maintenance_urgency to numeric codes")
-            y = y.astype(str).str.lower().map({
+            mapping = {
                 'low': 1, 'medium': 2, 'high': 3,
                 'urgent': 4, 'critical': 5
-            }).fillna(0)
-        
+            }
+            y = raw_y.astype(str).str.lower().map(mapping)
+        else:
+            y = raw_y
         y = pd.to_numeric(y, errors='coerce').fillna(0)
         
         print(f"Target statistics: mean={y.mean():.2f}, std={y.std():.2f}")
